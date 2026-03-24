@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <title>컬러피커</title>
+  <style>
+    body {
+      background: #1a1a1a;
+      margin: 0;
+    }
+    .picker-wrap {
+      display: flex;
+      gap: 14px;
+      padding: 28px 28px 16px;
+      align-items: flex-start;
+    }
+    .hue-canvas {
+      cursor: crosshair;
+      border-radius: 6px;
+      display: block;
+    }
+    .bright-canvas {
+      cursor: ns-resize;
+      border-radius: 6px;
+      display: block;
+    }
+    .info-panel {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      width: 180px;
+    }
+    .color-preview-box {
+      width: 100%;
+      height: 64px;
+      border-radius: 6px;
+      border: 1px solid #444;
+      background: #ff0000;
+    }
+    .hex-display {
+      font-family: monospace;
+      font-size: 15px;
+      color: #fff;
+      background: #2d2d2d;
+      padding: 7px 12px;
+      border-radius: 4px;
+      letter-spacing: 1px;
+    }
+    .value-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      color: #ccc;
+      font-size: 14px;
+    }
+    .value-num {
+      font-family: monospace;
+      background: #2d2d2d;
+      padding: 4px 10px;
+      border-radius: 4px;
+      color: #fff;
+      min-width: 44px;
+      text-align: right;
+    }
+    .save-btn {
+      width: 100%;
+      padding: 8px 0;
+      background: #2196F3;
+      color: #fff;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+      margin-top: 4px;
+    }
+    .save-btn:hover {
+      background: #1565C0;
+    }
+    .saved-section {
+      padding: 0 28px 24px;
+    }
+    .saved-label {
+      color: #888;
+      font-size: 13px;
+      margin-bottom: 10px;
+    }
+    .saved-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .saved-swatch {
+      width: 36px;
+      height: 36px;
+      border-radius: 4px;
+      border: 1px solid #444;
+      cursor: pointer;
+      title: '';
+    }
+    .saved-swatch:hover {
+      outline: 2px solid #fff;
+    }
+  </style>
+</head>
+<body>
+  <div class="picker-wrap">
+    <canvas class="hue-canvas" id="hueCanvas" width="44" height="280"></canvas>
+    <canvas class="bright-canvas" id="brightCanvas" width="44" height="280"></canvas>
+
+    <div class="info-panel">
+      <div class="color-preview-box" id="colorPreview"></div>
+      <div class="hex-display" id="hexDisplay">#ff0000</div>
+      <div class="value-row">
+        <span>빨강 (R)</span>
+        <span class="value-num" id="val1">255</span>
+      </div>
+      <div class="value-row">
+        <span>녹색 (G)</span>
+        <span class="value-num" id="val2">0</span>
+      </div>
+      <div class="value-row">
+        <span>파랑 (B)</span>
+        <span class="value-num" id="val3">0</span>
+      </div>
+      <button class="save-btn" onclick="saveColor()">색상 저장</button>
+    </div>
+  </div>
+
+  <div class="saved-section">
+    <div class="saved-label">저장된 색상</div>
+    <div class="saved-list" id="savedList"></div>
+  </div>
+
+  <script>
+    const hueCanvas    = document.getElementById('hueCanvas');
+    const brightCanvas = document.getElementById('brightCanvas');
+    const hueCtx       = hueCanvas.getContext('2d');
+    const brightCtx    = brightCanvas.getContext('2d');
+
+    let hue     = 0;
+    let hueY    = 0;
+    let brightY = brightCanvas.height / 2;
+    let currentR = 255, currentG = 0, currentB = 0;
+
+    // ── 그라디언트 그리기 ──────────────────────────────────
+
+    function drawHueGradient() {
+      const grad = hueCtx.createLinearGradient(0, 0, 0, hueCanvas.height);
+      grad.addColorStop(0,     'hsl(0,   100%, 50%)');  // 빨
+      grad.addColorStop(1/7,   'hsl(30,  100%, 50%)');  // 주
+      grad.addColorStop(2/7,   'hsl(60,  100%, 50%)');  // 노
+      grad.addColorStop(3/7,   'hsl(120, 100%, 50%)');  // 초
+      grad.addColorStop(4/7,   'hsl(210, 100%, 50%)');  // 파
+      grad.addColorStop(5/7,   'hsl(250, 100%, 50%)');  // 남
+      grad.addColorStop(6/7,   'hsl(280, 100%, 50%)');  // 보
+      grad.addColorStop(1,     'hsl(360, 100%, 50%)');
+      hueCtx.fillStyle = grad;
+      hueCtx.fillRect(0, 0, hueCanvas.width, hueCanvas.height);
+    }
+
+    function drawBrightGradient() {
+      const grad = brightCtx.createLinearGradient(0, 0, 0, brightCanvas.height);
+      grad.addColorStop(0,   '#ffffff');
+      grad.addColorStop(0.5, `hsl(${hue}, 100%, 50%)`);
+      grad.addColorStop(1,   '#000000');
+      brightCtx.fillStyle = grad;
+      brightCtx.fillRect(0, 0, brightCanvas.width, brightCanvas.height);
+    }
+
+    // ── 인디케이터 ────────────────────────────────────────
+
+    function drawIndicator(ctx, canvas, y) {
+      ctx.save();
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 2;
+      ctx.shadowColor = 'rgba(0,0,0,0.6)';
+      ctx.shadowBlur = 3;
+      ctx.beginPath();
+      ctx.rect(1, y - 4, canvas.width - 2, 8);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // ── 색상 정보 업데이트 ────────────────────────────────
+
+    function updateInfo() {
+      const hex = toHex(currentR, currentG, currentB);
+      document.getElementById('colorPreview').style.backgroundColor = `rgb(${currentR},${currentG},${currentB})`;
+      document.getElementById('hexDisplay').textContent = hex;
+      document.getElementById('val1').textContent = currentR;
+      document.getElementById('val2').textContent = currentG;
+      document.getElementById('val3').textContent = currentB;
+    }
+
+    // ── 색상 저장 ─────────────────────────────────────────
+
+    function saveColor() {
+      const hex = toHex(currentR, currentG, currentB);
+      const swatch = document.createElement('div');
+      swatch.className = 'saved-swatch';
+      swatch.style.backgroundColor = hex;
+      swatch.title = `${hex}  R:${currentR} G:${currentG} B:${currentB}`;
+      document.getElementById('savedList').appendChild(swatch);
+    }
+
+    // ── 유틸 ─────────────────────────────────────────────
+
+    function toHex(r, g, b) {
+      return '#' + [r, g, b].map(v => v.toString(16).padStart(2, '0')).join('');
+    }
+
+    // ── hue 선택 ─────────────────────────────────────────
+
+    function pickHue(y) {
+      hueY = Math.max(0, Math.min(y, hueCanvas.height - 1));
+      drawHueGradient();
+      const px = hueCtx.getImageData(Math.floor(hueCanvas.width / 2), hueY, 1, 1).data;
+      const r = px[0] / 255, g = px[1] / 255, b = px[2] / 255;
+      const max = Math.max(r, g, b), d = max - Math.min(r, g, b);
+      if (d > 0) {
+        if (max === r)      hue = ((g - b) / d % 6) * 60;
+        else if (max === g) hue = ((b - r) / d + 2) * 60;
+        else                hue = ((r - g) / d + 4) * 60;
+        if (hue < 0) hue += 360;
+      }
+      drawIndicator(hueCtx, hueCanvas, hueY);
+      redrawBright();
+    }
+
+    // ── bright 선택 ───────────────────────────────────────
+
+    function pickBright(y) {
+      brightY = Math.max(0, Math.min(y, brightCanvas.height - 1));
+      redrawBright();
+    }
+
+    function redrawBright() {
+      drawBrightGradient();
+      const px = brightCtx.getImageData(Math.floor(brightCanvas.width / 2), brightY, 1, 1).data;
+      currentR = px[0]; currentG = px[1]; currentB = px[2];
+      drawIndicator(brightCtx, brightCanvas, brightY);
+      updateInfo();
+    }
+
+    // ── 이벤트 ───────────────────────────────────────────
+
+    let dragHue = false, dragBright = false;
+
+    hueCanvas.addEventListener('mousedown', e => { dragHue = true; pickHue(e.offsetY); });
+    hueCanvas.addEventListener('mousemove', e => { if (dragHue) pickHue(e.offsetY); });
+
+    brightCanvas.addEventListener('mousedown', e => { dragBright = true; pickBright(e.offsetY); });
+    brightCanvas.addEventListener('mousemove', e => { if (dragBright) pickBright(e.offsetY); });
+
+    document.addEventListener('mouseup', () => { dragHue = false; dragBright = false; });
+
+    // ── 초기 렌더 ─────────────────────────────────────────
+
+    drawHueGradient();
+    drawIndicator(hueCtx, hueCanvas, hueY);
+    redrawBright();
+  </script>
+</body>
+</html>
